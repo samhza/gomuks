@@ -36,8 +36,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/yuin/goldmark"
+	"github.com/zyedidia/clipboard"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -288,6 +290,46 @@ func cmdUpload(cmd *Command) {
 
 func cmdOpen(cmd *Command) {
 	cmd.Room.StartSelecting(SelectOpen, strings.Join(cmd.Args, " "))
+}
+
+func cmdPaste(cmd *Command) {
+	contents, err := clipboard.ReadAll("clipboard")
+	if err != nil {
+		cmd.Reply("Failed to read clipboard: %v", err)
+		return
+	}
+	if len(contents) == 0 {
+		cmd.Reply("Clipboard is empty")
+		return
+	}
+	mime, _ := mimetype.DetectReader(strings.NewReader(contents))
+	if mime.Is("application/octet-stream") {
+		cmd.Reply("Couldn't determine mimetype of clipboard contents")
+		return
+	}
+	if mime.Is("text/plain") {
+		go cmd.Room.SendMessage(event.MsgText, contents)
+		return
+	}
+	ext := mime.Extension()
+	if ext == "" {
+		cmd.Reply("Couldn't determine extension of clipboard contents")
+		return
+	}
+	tmpfile, err := os.CreateTemp("", "gomuks-clipboard-*"+ext)
+	if err != nil {
+		cmd.Reply("Failed to create temp file: %v", err)
+		return
+	}
+	path := tmpfile.Name()
+	go func() {
+		_, err := tmpfile.WriteString(contents)
+		if err == nil {
+			cmd.Room.SendMessageMedia(path)
+		}
+		tmpfile.Close()
+		os.Remove(path)
+	}()
 }
 
 func cmdCopy(cmd *Command) {
